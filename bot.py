@@ -1,12 +1,38 @@
-﻿import os
+import os
+import sys
 import random
 import requests
+import asyncio
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, ReplyKeyboardMarkup, Poll
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from deep_translator import GoogleTranslator
 
+# Thiết lập UTF-8 để không bị lỗi ký tự Unicode trên Windows
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 import database as db
 import excel_exporter as exporter
+
+# Web server mini giúp Render nhận diện bot đang sống (không bị lỗi port)
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running 24/7!")
+    def log_message(self, format, *args):
+        pass
+
+def start_dummy_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), DummyHandler)
+    server.serve_forever()
 
 BOT_TOKEN = "8293161016:AAGPDbP0zB4rK5WpQ6ewYoPELWrKGtInb4k"
 user_units = {}
@@ -40,7 +66,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
         "👋 Chào mừng bạn đến với **Bot Học Từ Vựng Tiếng Anh**!\n\n"
         "✨ **Cách sử dụng:**\n"
-        "1. **Tự động tra nghĩa:** Chỉ cần gõ từ tiếng Anh gửi vào đây (VD: `curiosity` hoặc `nuclear family`).\n"
+        "1. **Tự động tra nghĩa:** Gõ từ tiếng Anh gửi vào đây (VD: `curiosity` hoặc `nuclear family`).\n"
         "2. **Tự định nghĩa:** `từ | loại từ | nghĩa`\n"
         "   (VD: `upset someone | v.phr | làm ai đó buồn lòng`)\n\n"
         "📊 Bấm **📝 Xuất file Excel** để nhận file bài tập tự kiểm tra đúng/sai chuẩn mẫu!"
@@ -144,6 +170,17 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     db.init_db()
+    
+    # Khởi động server web phụ để Render nhận diện port
+    threading.Thread(target=start_dummy_server, daemon=True).start()
+
+    # Thiết lập event loop an toàn cho mọi phiên bản Python (kể cả Python 3.14 trên Render)
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start_command))
@@ -152,10 +189,7 @@ def main():
     app.add_handler(CommandHandler("unit", set_unit))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 
-    print("==================================================")
-    print("🚀 Bot MyVocabMasterBot ĐANG CHẠY RỒI ĐÓ BẠN!")
-    print("👉 Bây giờ bạn quay lại Telegram nhắn tin là bot sẽ trả lời ngay.")
-    print("==================================================")
+    print("[INFO] Bot MyVocabMasterBot is now running successfully!")
     app.run_polling()
 
 if __name__ == "__main__":
